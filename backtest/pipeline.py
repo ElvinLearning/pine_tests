@@ -48,9 +48,10 @@ GRID = dict(
     piv=[2, 3],
     pullback=["off", "moderate", "strict"],      # G1
     htf_clean=[False, True],                     # G2
-    pd_level=[1.0, 0.5],                         # G2
-    appr_k=[0.0, 0.5],                           # G3
+    htf2=[0, 60],                                # second agreeing timeframe (top-down)
+    sweep=[False, True],                         # internal-liquidity sweep entries
 )
+# G2 discount/premium and G3 pre-fill cancel never helped in development; they stay as Pine inputs, off.
 PULLBACK = {"off": (99.0, 1.0), "moderate": (0.6, 0.7), "strict": (0.4, 0.5)}
 MIN_IS_TRADES = 30
 
@@ -65,11 +66,11 @@ def _init(path, split_ts):
 
 
 def _combo_params(combo):
-    (mode, tgt), rr, htf, piv, pb, clean, pdl, appr = combo
+    (mode, tgt), rr, htf, piv, pb, clean, htf2, sweep = combo
     spd, er = PULLBACK[pb]
     return Params(entry_mode=mode, target_mode=tgt, fixed_rr=rr, min_rr=rr, htf=htf, piv=piv,
                   require_fvg=True, mom_k=2.0, be_r=0.0, pb_speed_max=spd, pb_er_max=er,
-                  htf_clean=clean, pd_level=pdl, appr_k=appr)
+                  htf_clean=clean, htf2=htf2, sweep_entries=sweep)
 
 
 def _eval_combo(combo):
@@ -116,7 +117,7 @@ def main():
     fields = Params().to_dict().keys()
     best = Params(**{k: (best_row[k].item() if hasattr(best_row[k], "item") else best_row[k]) for k in fields})
     print("best in-sample:", {k: best_row[k] for k in ["entry_mode", "target_mode", "fixed_rr", "htf", "piv",
-                                                       "pb_speed_max", "pb_er_max", "htf_clean", "pd_level", "appr_k",
+                                                       "pb_speed_max", "pb_er_max", "htf_clean", "htf2", "sweep_entries",
                                                        "n", "net", "pf", "win", "expR", "sqn"]})
 
     # ---------------- 4. locked run, split IS / OOS ----------------
@@ -137,7 +138,7 @@ def main():
         tr = [t for t in run(full, p) if t["entry_bar"] >= split_i]
         so = stats(tr)
         top.append(dict(model=f"{p.entry_mode}/{p.target_mode}", rr=p.fixed_rr, htf=p.htf, piv=p.piv,
-                        pb=(p.pb_speed_max, p.pb_er_max), htf_clean=p.htf_clean, pd=p.pd_level, appr=p.appr_k,
+                        pb=(p.pb_speed_max, p.pb_er_max), htf_clean=p.htf_clean, htf2=p.htf2, sweep=p.sweep_entries,
                         is_n=int(r.n), is_sqn=round(r.sqn, 2),
                         oos_n=so["n"], oos_net=round(so["net"]), oos_expR=round(so["expR"], 3)))
 

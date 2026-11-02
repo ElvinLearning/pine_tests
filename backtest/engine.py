@@ -35,6 +35,7 @@ class Params:
     # top-down: higher-timeframe bias
     htf: int = 60              # minutes
     htf_piv: int = 2           # HTF swing pivot strength (bars each side)
+    htf2: int = 0              # second, higher timeframe that must agree with the HTF bias (0 = off)
     # execution timeframe structure
     piv: int = 3               # swing pivot strength on the chart TF
     int_piv: int = 2           # internal pivots (confirmation + equal highs/lows)
@@ -59,6 +60,7 @@ class Params:
     appr_k: float = 0.0        # G3: cancel if price within appr_atr ATR and falling >= appr_k ATR/bar (0 = off)
     appr_n: int = 3
     appr_atr: float = 1.0
+    sweep_entries: bool = False # internal-liquidity sweep setup: wick through an internal low/high, close back, then LTF break
     max_consec_losses: int = 2 # G4: stop for the day after this many straight losses (0 = off)
     room_frac: float = 0.9     # G4: risk <= this share of the remaining daily loss room
     # risk / prop-firm eval
@@ -257,6 +259,9 @@ def run(cache: Cache, p: Params, start: int = 0, end: int | None = None, funnel:
     ph_i, pl_i = cache.piv(p.int_piv)
     H = cache.htf(p.htf, p.htf_piv)
     htf = H["trend"]
+    if p.htf2 > 0:                       # top-down agreement: both timeframes must point the same way
+        t2 = cache.htf(p.htf2, p.htf_piv)["trend"]
+        htf = np.where(t2 == htf, htf, 0).astype(np.int8)
     pv, ft, slip = p.point_value, p.fill_ticks * TICK, p.slip_ticks * TICK
     buf = p.stop_buf_ticks * TICK
 
@@ -399,6 +404,8 @@ def run(cache: Cache, p: Params, start: int = 0, end: int | None = None, funnel:
             lph, lph_bar, phb = ph_s[i], i - p.piv, False
         if not np.isnan(pl_s[i]):
             lpl, lpl_bar, plb = pl_s[i], i - p.piv, False
+        swept_lo = [v for v in eq_lows if li < v]
+        swept_hi = [v for v in eq_highs if hi_ > v]
         eq_lows = [v for v in eq_lows if not li < v]
         eq_highs = [v for v in eq_highs if not hi_ > v]
         if not np.isnan(ph_i[i]):
@@ -483,6 +490,17 @@ def run(cache: Cache, p: Params, start: int = 0, end: int | None = None, funnel:
                 bump("zone_short" if nz else "bos_short_no_imbalance")
                 zone = nz or zone
 
+        # ---- internal liquidity sweep -> armed pseudo-zone (needs LTF confirmation) ----
+        if p.sweep_entries and zone is None and signal is None:
+            if ht == 1 and swept_lo and ci > max(swept_lo):
+                zone = dict(dir=1, top=max(swept_lo), bot=li, leg_x=(lph if lph > ci else np.nan), leg_bar=i, pb_x=li, ext_bar=i,
+                            bar=i, armed=True, tap_bar=i, tap_x=li, pb_ok=True, sweep=True)
+                bump("sweep_long")
+            elif ht == -1 and swept_hi and ci < min(swept_hi):
+                zone = dict(dir=-1, top=hi_, bot=min(swept_hi), leg_x=(lpl if lpl < ci else np.nan), leg_bar=i, pb_x=hi_, ext_bar=i,
+                            bar=i, armed=True, tap_bar=i, tap_x=hi_, pb_ok=True, sweep=True)
+                bump("sweep_short")
+
         # ---- position management ----
         if pos != 0:
             risk_pts = abs(entry - stop0)
@@ -515,7 +533,7 @@ def run(cache: Cache, p: Params, start: int = 0, end: int | None = None, funnel:
                     bump("order_sent")
                     q, T, rk = order
                     pend_mkt = (d, q, S, T, rk)
-        elif zone is not None and p.entry_mode == "limit" and can_trade:
+        elif zone is not None and p.entry_mode == "limit" and not zone["armed"] and can_trade:
             d = zone["dir"]
             E = zone["top"] if d == 1 else zone["bot"]
             S = (zone["bot"] - buf) if d == 1 else (zone["top"] + buf)
@@ -597,7 +615,7 @@ def _plan(d, E, S, leg_x, p: Params, atr_i, eq_lows, eq_highs, risk_eff, bump=la
         T = E + d * p.fixed_rr * risk_pts
     else:
         T = leg_x
-        if (T - E) * d / risk_pts < p.min_rr:
+        if np.isnan(T) or (T - E) * d / risk_pts < p.min_rr:
             bump("plan_rr_too_low")
             return None
     # golden rule: never buy above equal lows / never sell below equal highs

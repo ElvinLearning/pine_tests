@@ -5,7 +5,9 @@ market structure with body-close breaks, supply and demand zones with an open im
 equal highs/lows golden rule, momentum, and top-down bias. It adds a context layer that turns the course's
 "discretionary" reads into measurable rules, plus prop-firm drawdown guards.
 
-**Status: the coin-flip gate FAILS on blind data. Paper trade only.** Full numbers: [reports/REPORT.md](reports/REPORT.md).
+**Status: the coin-flip gate FAILS. Paper trade only, NQ/MNQ only.** Best result on never-seen NQ data:
+51 trades, +$4,172, +0.36R per trade, p = 0.065 / 0.034 (needed < 0.0167). It lost on S&P (MES) data.
+Full numbers: [reports/REPORT.md](reports/REPORT.md). Exam rules: [backtest/HOLDOUT_PROTOCOL.md](backtest/HOLDOUT_PROTOCOL.md).
 
 | Path | What it is |
 |---|---|
@@ -13,6 +15,7 @@ equal highs/lows golden rule, momentum, and top-down bias. It adds a context lay
 | `backtest/engine.py` | Bar-for-bar Python mirror of the Pine logic and TradingView's fill rules. |
 | `backtest/pipeline.py` | Tune on the first half, test once on the second half, coin-flip gate, prop-eval sim, self-update. |
 | `backtest/coinflip.py` | The coin-flip rule. |
+| `backtest/dev_search.py`, `dev_gate.py`, `final_exam.py` | Development search, exam entry gate, final exam on untouched data. |
 | `backtest/prop_eval.py` | Topstep-style 50K eval simulator. |
 | `backtest/update_pine.py` | Rewrites the AUTO-PARAMS block in the Pine file. |
 | `backtest/refresh_data.py` | Appends new bars (TradingView CSV export or Yahoo) for re-tuning. |
@@ -39,8 +42,10 @@ Context layer:
 * G4 prop drawdown: size every trade to fit the remaining daily loss room, stop after 2 straight losses,
   daily loss limit, max 3 trades a day, flat by 15:50 New York time.
 
-Current parameters (auto-tuned, see the AUTO-PARAMS block): 15-minute HTF, 5-minute chart, limit entry at the zone,
-fixed 2R target, G1 moderate, G2 clean structure on, G3 off.
+Current parameters (combo 209, see the AUTO-PARAMS block): 5-minute chart, 15-minute bias that a 60-minute
+timeframe must agree with, clean HTF structure required, limit entry at fresh zones plus internal-liquidity
+sweep entries (wick through an internal low/high, close back, then a lower-timeframe break), fixed 2.5R target,
+entries 09:35-15:00 New York. Use it on NQ/MNQ only.
 
 ## Paper trading on TradingView
 

@@ -34,17 +34,17 @@ strategy("Structure S/D Day Bot", shorttitle = "SD Day Bot", overlay = true,
      max_boxes_count = 50, max_labels_count = 200)
 
 // ==== AUTO-PARAMS START (written by backtest/update_pine.py - do not edit by hand) ====
-const string AP_VERSION = "2026-11-02 21:07 UTC"
+const string AP_VERSION = "2026-11-02 21:45 UTC"
 const string AP_GATE = "FAIL"
-const string AP_OOS = "OOS n=25 net=$83 PF=1.02 expR=0.08 p_dir=0.397 p_time=0.304"
+const string AP_OOS = "OOS n=51 net=$4,172 PF=1.62 expR=0.36 p_dir=0.065 p_time=0.034"
 const string AP_HTF = "15"
 const int AP_HTF_PIV = 2
 const int AP_PIV = 2
 const int AP_INT_PIV = 2
 const string AP_ENTRY = "Limit at zone"
 const string AP_TARGET = "Fixed R"
-const float AP_FIXED_RR = 2.0
-const float AP_MIN_RR = 2.0
+const float AP_FIXED_RR = 2.5
+const float AP_MIN_RR = 2.5
 const bool AP_FVG = true
 const float AP_MOM_K = 2.0
 const float AP_EQ_TOL = 0.1
@@ -53,8 +53,8 @@ const float AP_BE_R = 0.0
 const int AP_BUF = 4
 const int AP_ZONE_AGE = 96
 const int AP_CONF_BARS = 24
-const float AP_PB_SPEED = 0.6
-const float AP_PB_ER = 0.7
+const float AP_PB_SPEED = 99.0
+const float AP_PB_ER = 1.0
 const bool AP_HTF_CLEAN = true
 const float AP_PD = 1.0
 const float AP_APPR_K = 0.0
@@ -62,6 +62,11 @@ const int AP_APPR_N = 3
 const float AP_APPR_ATR = 1.0
 const int AP_CONSEC = 2
 const float AP_ROOM = 0.9
+const bool AP_USE_HTF2 = true
+const string AP_HTF2 = "60"
+const string AP_ENTRY_START = "09:35"
+const string AP_ENTRY_END = "15:00"
+const bool AP_SWEEP = true
 // ==== AUTO-PARAMS END ====
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -70,6 +75,8 @@ const float AP_ROOM = 0.9
 string G1 = "Top-down structure"
 string htfTF      = input.timeframe(AP_HTF, "HTF bias timeframe", group = G1)
 int    htfPiv     = input.int(AP_HTF_PIV, "HTF swing strength (bars each side)", minval = 1, group = G1)
+bool   useHtf2    = input.bool(AP_USE_HTF2, "Require a second, higher timeframe to agree", group = G1)
+string htf2TF     = input.timeframe(AP_HTF2, "Second HTF", group = G1)
 int    pivLen     = input.int(AP_PIV, "Swing strength on chart TF", minval = 1, group = G1)
 int    intPiv     = input.int(AP_INT_PIV, "Internal swing strength (confirmation, equal H/L)", minval = 1, group = G1)
 
@@ -87,6 +94,7 @@ int    bufTicks   = input.int(AP_BUF, "Stop buffer (ticks)", minval = 0, group =
 int    zoneAge    = input.int(AP_ZONE_AGE, "Zone max age (bars)", minval = 1, group = G2)
 int    confBars   = input.int(AP_CONF_BARS, "Confirmation max wait (bars)", minval = 1, group = G2)
 int    maxLegBars = input.int(300, "Max impulse leg length (bars)", minval = 10, maxval = 400, group = G2)
+bool   useSweeps  = input.bool(AP_SWEEP, "Liquidity sweep entries (wick through internal low/high, close back, LTF break)", group = G2)
 
 string G5 = "Context layer"
 float  pbSpeedMax = input.float(AP_PB_SPEED, "G1 pullback speed / impulse speed max (99 = off)", step = 0.05, group = G5)
@@ -100,8 +108,8 @@ int    maxConsec  = input.int(AP_CONSEC, "G4 stop for the day after N straight l
 float  roomFrac   = input.float(AP_ROOM, "G4 risk <= share of remaining daily loss room", step = 0.05, group = G5)
 
 string G3 = "Session (New York time, bar close)"
-string sEntryStart = input.string("09:35", "Entries from", group = G3)
-string sEntryEnd   = input.string("15:00", "Entries until", group = G3)
+string sEntryStart = input.string(AP_ENTRY_START, "Entries from", group = G3)
+string sEntryEnd   = input.string(AP_ENTRY_END, "Entries until", group = G3)
 string sFlat       = input.string("15:50", "Flatten at", group = G3)
 
 string G4 = "Risk / prop-firm eval"
@@ -193,7 +201,9 @@ f_htf(int n) =>
 // Series
 // ---------------------------------------------------------------------------------------------------------------------
 [hTrendRaw, hPL, hRH, hPH, hRL, hUpClean, hDnClean] = request.security(syminfo.tickerid, htfTF, f_htf(htfPiv), lookahead = barmerge.lookahead_on)
-int   htfTrend = nz(hTrendRaw)
+[h2TrendRaw, h2a, h2b, h2c, h2d, h2e, h2f] = request.security(syminfo.tickerid, htf2TF, f_htf(htfPiv), lookahead = barmerge.lookahead_on)
+int   htfTrend0 = nz(hTrendRaw)
+int   htfTrend = useHtf2 and nz(h2TrendRaw) != htfTrend0 ? 0 : htfTrend0     // top-down agreement
 float atrV     = ta.atr(14)
 float ftPts    = 1 * syminfo.mintick          // matches backtest_fill_limits_assumption = 1
 float bufPts   = bufTicks * syminfo.mintick
@@ -438,14 +448,20 @@ if not na(swPL)
     lpl := swPL
     lplBar := bar_index - pivLen
     plb := false
-// drop swept levels, then add new internal pivots (keep the last 10)
+// drop swept levels (remember them for sweep entries), then add new internal pivots (keep the last 10)
+float sweptLoMax = na
+float sweptHiMin = na
 if array.size(eqLows) > 0
     for k = array.size(eqLows) - 1 to 0
-        if low < array.get(eqLows, k)
+        float v = array.get(eqLows, k)
+        if low < v
+            sweptLoMax := na(sweptLoMax) ? v : math.max(sweptLoMax, v)
             array.remove(eqLows, k)
 if array.size(eqHighs) > 0
     for k = array.size(eqHighs) - 1 to 0
-        if high > array.get(eqHighs, k)
+        float v = array.get(eqHighs, k)
+        if high > v
+            sweptHiMin := na(sweptHiMin) ? v : math.min(sweptHiMin, v)
             array.remove(eqHighs, k)
 if not na(inPH)
     intPH := inPH
@@ -567,6 +583,36 @@ if not plb and close < lpl
             if not na(zBox)
                 box.delete(zBox)
             zBox := showZones ? box.new(bar_index, zt, bar_index + 1, zb, border_color = color.new(color.maroon, 30), bgcolor = color.new(color.red, 85), text = "SZ", text_size = size.tiny, text_color = color.maroon) : na
+// internal liquidity sweep -> armed pseudo-zone that still needs the lower-timeframe break
+if useSweeps and zDir == 0 and not signal
+    if htfTrend == 1 and not na(sweptLoMax) and close > sweptLoMax
+        zDir := 1
+        zTop := sweptLoMax
+        zBot := low
+        zLeg := lph > close ? lph : na
+        zLegBar := bar_index
+        zExtBar := bar_index
+        zPbX := low
+        zPbOk := true
+        zBar := bar_index
+        zArmed := true
+        zTapBar := bar_index
+        zTapX := low
+        lastSkip := "sweep long armed"
+    else if htfTrend == -1 and not na(sweptHiMin) and close < sweptHiMin
+        zDir := -1
+        zTop := high
+        zBot := sweptHiMin
+        zLeg := lpl < close ? lpl : na
+        zLegBar := bar_index
+        zExtBar := bar_index
+        zPbX := high
+        zPbOk := true
+        zBar := bar_index
+        zArmed := true
+        zTapBar := bar_index
+        zTapX := high
+        lastSkip := "sweep short armed"
 if not na(zBox) and zDir != 0
     box.set_right(zBox, bar_index + 1)
 
@@ -622,7 +668,7 @@ if signal and canTrade
             placed := true
         else
             lastSkip := "R:R, golden rule or size"
-else if zDir != 0 and isLimit and canTrade
+else if zDir != 0 and isLimit and not zArmed and canTrade
     float E = zDir == 1 ? zTop : zBot
     float S = zDir == 1 ? zBot - bufPts : zTop + bufPts
     if not f_pbOk(zDir, zLeg, zLegBar, zExtBar, zBot, zTop, zPbX)

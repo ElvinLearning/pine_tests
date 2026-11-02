@@ -1,15 +1,16 @@
 {
-  "version": "2026-11-02 21:07 UTC",
+  "version": "2026-11-02 21:45 UTC",
   "gate": "FAIL",
   "params": {
     "htf": 15,
     "htf_piv": 2,
+    "htf2": 60,
     "piv": 2,
     "int_piv": 2,
     "entry_mode": "limit",
     "target_mode": "fixed",
-    "fixed_rr": 2.0,
-    "min_rr": 2.0,
+    "fixed_rr": 2.5,
+    "min_rr": 2.5,
     "require_fvg": true,
     "mom_k": 2.0,
     "eq_tol_atr": 0.1,
@@ -19,13 +20,14 @@
     "zone_max_age": 96,
     "conf_max_bars": 24,
     "max_leg_bars": 300,
-    "pb_speed_max": 0.6,
-    "pb_er_max": 0.7,
+    "pb_speed_max": 99.0,
+    "pb_er_max": 1.0,
     "htf_clean": true,
     "pd_level": 1.0,
     "appr_k": 0.0,
     "appr_n": 3,
     "appr_atr": 1.0,
+    "sweep_entries": true,
     "max_consec_losses": 2,
     "room_frac": 0.9,
     "risk_usd": 300.0,
@@ -44,16 +46,12 @@
     "guard_n": 20
   },
   "oos": {
-    "label": "out-of-sample",
-    "n": 25,
-    "net": 83.0,
-    "pf": 1.023135888501742,
-    "win": 0.4,
-    "expR": 0.07703562011111163,
-    "sqn": 0.27871040268586056,
-    "maxdd": 1581.0
+    "n": 51,
+    "net": 4171.5,
+    "pf": 1.6202051739518286,
+    "expR": 0.36262592207540845
   },
-  "p_direction": 0.3965,
-  "p_timing": 0.3045,
-  "note": "Promoted because the previous params never passed either. Paper trading only until the gate passes."
+  "p_direction": 0.0646,
+  "p_timing": 0.0335,
+  "note": "Combo 209. Final exam 3/3 failed (closest: fresh NQ Oct 2022 - Mar 2023, 51 trades, +$4,172, p 0.065 / 0.034 vs needed 0.0167). Lost on MES 2020: NQ only. Paper trade only."
 }

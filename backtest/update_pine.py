@@ -22,6 +22,11 @@ START = "// ==== AUTO-PARAMS START"
 END = "// ==== AUTO-PARAMS END ===="
 
 
+def _hm(m):
+    m = int(m)
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
 def _f(x):
     s = repr(float(x))
     return s
@@ -69,6 +74,11 @@ def render(meta: dict) -> str:
         f'const float AP_APPR_ATR = {_f(p["appr_atr"])}',
         f'const int AP_CONSEC = {int(p["max_consec_losses"])}',
         f'const float AP_ROOM = {_f(p["room_frac"])}',
+        f'const bool AP_USE_HTF2 = {"true" if int(p["htf2"]) > 0 else "false"}',
+        f'const string AP_HTF2 = "{int(p["htf2"]) if int(p["htf2"]) > 0 else 240}"',
+        f'const string AP_ENTRY_START = "{_hm(p["entry_start"])}"',
+        f'const string AP_ENTRY_END = "{_hm(p["entry_end"])}"',
+        f'const bool AP_SWEEP = {"true" if p["sweep_entries"] else "false"}',
         END,
     ]
     return "\n".join(lines)

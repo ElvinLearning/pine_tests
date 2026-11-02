@@ -1,0 +1,47 @@
+[
+ {
+  "combo": "36",
+  "n": 61,
+  "net": 6072,
+  "expR": 0.395,
+  "p_dir": 0.0434,
+  "p_time": 0.0,
+  "gate": "ENTER EXAM"
+ },
+ {
+  "combo": "209",
+  "n": 116,
+  "net": 7660,
+  "expR": 0.273,
+  "p_dir": 0.0348,
+  "p_time": 0.006666666666666667,
+  "gate": "ENTER EXAM"
+ },
+ {
+  "combo": "196",
+  "n": 112,
+  "net": 6906,
+  "expR": 0.248,
+  "p_dir": 0.1378,
+  "p_time": 0.01,
+  "gate": "skip"
+ },
+ {
+  "combo": "16",
+  "n": 72,
+  "net": 5094,
+  "expR": 0.274,
+  "p_dir": 0.0797,
+  "p_time": 0.023333333333333334,
+  "gate": "ENTER EXAM"
+ },
+ {
+  "combo": "41",
+  "n": 86,
+  "net": 3382,
+  "expR": 0.208,
+  "p_dir": 0.0737,
+  "p_time": 0.035,
+  "gate": "ENTER EXAM"
+ }
+]

@@ -6,6 +6,30 @@ Sizing: MNQ ($2/pt), $300 risk per trade, $0.50/contract/side commission, 1 tick
 
 **Verdict: FAIL on the coin-flip rule. Paper trade only. Do not run it on a paid eval yet.**
 
+## Final exam on untouched data (protocol: `backtest/HOLDOUT_PROTOCOL.md`)
+
+After the first two runs, the search continued on development data (Jan 2025 - Apr 2026, now fully used)
+and the best candidates took a final exam on data the bot had never seen. Rules were written down before each run:
+at most 3 attempts, p < 0.05/3 = 0.0167 on both coin-flip tests, >= 30 trades, net > 0.
+
+| Attempt | Candidate | Exam data | Trades | Net | Avg R | p direction | p timing | Result |
+|---|---|---|---|---|---|---|---|---|
+| (skipped) | combo 36 picked by first-half rule | entry gate: p 0.41 / 0.32 on second half | | | | | | not sent |
+| 1 | combo 36 (zones, 15m bias, G1+G2, 2R) | NQ Apr-Aug 2022 + MES 2020 | 56 | -$22 | +0.02 | 0.39 | 0.24 | FAIL |
+| 2 | combo 209 (zones + sweeps, 15m+60m agree, clean HTF, 2.5R) | NQ Apr-Aug 2022 + MES 2020 | 115 | -$147 | -0.08 | 0.76 | 0.52 | FAIL |
+| 3 | combo 209, unchanged | fresh NQ Oct 2022 - Mar 2023 | 51 | **+$4,172** | **+0.36** | 0.065 | 0.034 | FAIL |
+
+By dataset, combo 209 made money on both untouched NQ periods (Apr-Aug 2022: 27 trades, +0.47R;
+Oct 2022 - Mar 2023: 51 trades, +0.36R) and lost on MES 2020 (88 trades, -0.25R). The edge, if real, is NQ-specific.
+Attempt 3 was the last one allowed. Running more tests on new data until one passes would make a "pass"
+meaningless, so the search stopped there.
+
+How much proof is missing: at +0.36R per trade, roughly 70-100 trades are needed to clear p < 0.0167.
+The bot takes about 7 NQ trades a month, so 10-14 months of forward trades.
+
+The Pine script now ships combo 209 (NQ only) with the gate showing FAIL. Full log: `final_exam_log.json`.
+The sections below describe the earlier development runs.
+
 ![Equity](equity.png)
 
 ## How it was tested
