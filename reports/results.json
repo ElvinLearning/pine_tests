@@ -1,0 +1,363 @@
+{
+  "version": "2026-11-02 21:07 UTC",
+  "data": {
+    "file": "nq_ohlcv_1m_2025-2026.parquet",
+    "first": "2025-01-01 18:00:00-05:00",
+    "last": "2026-04-24 16:55:00-04:00",
+    "split": "2025-08-27 18:00:00-04:00",
+    "chart_tf_min": 5
+  },
+  "params": {
+    "htf": 15,
+    "htf_piv": 2,
+    "piv": 2,
+    "int_piv": 2,
+    "entry_mode": "limit",
+    "target_mode": "fixed",
+    "fixed_rr": 2.0,
+    "min_rr": 2.0,
+    "require_fvg": true,
+    "mom_k": 2.0,
+    "eq_tol_atr": 0.1,
+    "eq_range_atr": 3.0,
+    "be_r": 0.0,
+    "stop_buf_ticks": 4,
+    "zone_max_age": 96,
+    "conf_max_bars": 24,
+    "max_leg_bars": 300,
+    "pb_speed_max": 0.6,
+    "pb_er_max": 0.7,
+    "htf_clean": true,
+    "pd_level": 1.0,
+    "appr_k": 0.0,
+    "appr_n": 3,
+    "appr_atr": 1.0,
+    "max_consec_losses": 2,
+    "room_frac": 0.9,
+    "risk_usd": 300.0,
+    "point_value": 2.0,
+    "max_qty": 50,
+    "comm_per_side": 0.5,
+    "slip_ticks": 1,
+    "fill_ticks": 1,
+    "entry_start": 575,
+    "entry_end": 900,
+    "flat_time": 950,
+    "max_trades_day": 3,
+    "daily_loss": 1000.0,
+    "daily_profit_cap": 0.0,
+    "guard_on": true,
+    "guard_n": 20
+  },
+  "note": "OOS half used twice: run 1 = mechanical rules only (FAIL); run 2 = with context layer G1-G4, which came from the course/user, not from OOS results",
+  "in_sample": {
+    "label": "in-sample",
+    "n": 36,
+    "net": 5988.5,
+    "pf": 2.475908810844116,
+    "win": 0.5555555555555556,
+    "expR": 0.6162624798549973,
+    "sqn": 2.5416904094296147,
+    "maxdd": 574.5
+  },
+  "out_of_sample": {
+    "label": "out-of-sample",
+    "n": 25,
+    "net": 83.0,
+    "pf": 1.023135888501742,
+    "win": 0.4,
+    "expR": 0.07703562011111163,
+    "sqn": 0.27871040268586056,
+    "maxdd": 1581.0
+  },
+  "funnel": {
+    "bos_long_no_imbalance": 1610,
+    "zone_long": 878,
+    "tap": 1011,
+    "zone_short": 705,
+    "bos_short_no_imbalance": 1284,
+    "plan_equal_hl_golden_rule": 389,
+    "ctx_pullback_too_aggressive": 2548,
+    "kill_momentum_candle": 93,
+    "ctx_htf_not_clean": 642,
+    "kill_htf_flip": 94,
+    "plan_stop_too_wide_or_no_daily_room": 17,
+    "kill_age": 9
+  },
+  "daily_risk": {
+    "in_sample": {
+      "worst_day": -573.0,
+      "worst_day_pct": -1.146,
+      "days_traded": 34,
+      "days_le_minus_1000": 0,
+      "days_le_minus_4pct": 0,
+      "max_losing_streak_days": 2
+    },
+    "out_of_sample": {
+      "worst_day": -318.0,
+      "worst_day_pct": -0.636,
+      "days_traded": 24,
+      "days_le_minus_1000": 0,
+      "days_le_minus_4pct": 0,
+      "max_losing_streak_days": 4
+    }
+  },
+  "top10_is_sets_oos": [
+    {
+      "model": "limit/fixed",
+      "rr": 2.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 36,
+      "is_sqn": 2.54,
+      "oos_n": 25,
+      "oos_net": 83,
+      "oos_expR": 0.077
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 3.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 36,
+      "is_sqn": 2.42,
+      "oos_n": 22,
+      "oos_net": -1612,
+      "oos_expR": -0.076
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.5,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 36,
+      "is_sqn": 2.33,
+      "oos_n": 22,
+      "oos_net": -300,
+      "oos_expR": -0.013
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        99.0,
+        1.0
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 62,
+      "is_sqn": 2.24,
+      "oos_n": 39,
+      "oos_net": -550,
+      "oos_expR": -0.035
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.5,
+      "is_n": 34,
+      "is_sqn": 2.15,
+      "oos_n": 24,
+      "oos_net": 284,
+      "oos_expR": 0.123
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 3.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        99.0,
+        1.0
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 62,
+      "is_sqn": 2.12,
+      "oos_n": 37,
+      "oos_net": -1300,
+      "oos_expR": -0.151
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.5,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        99.0,
+        1.0
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 62,
+      "is_sqn": 2.11,
+      "oos_n": 38,
+      "oos_net": -1210,
+      "oos_expR": -0.047
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 3.0,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.5,
+      "is_n": 34,
+      "is_sqn": 1.96,
+      "oos_n": 21,
+      "oos_net": -886,
+      "oos_expR": -0.03
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.0,
+      "htf": 15,
+      "piv": 3,
+      "pb": [
+        99.0,
+        1.0
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.0,
+      "is_n": 50,
+      "is_sqn": 1.92,
+      "oos_n": 33,
+      "oos_net": -1214,
+      "oos_expR": -0.32
+    },
+    {
+      "model": "limit/fixed",
+      "rr": 2.5,
+      "htf": 15,
+      "piv": 2,
+      "pb": [
+        0.6,
+        0.7
+      ],
+      "htf_clean": true,
+      "pd": 1.0,
+      "appr": 0.5,
+      "is_n": 34,
+      "is_sqn": 1.9,
+      "oos_n": 21,
+      "oos_net": -84,
+      "oos_expR": 0.035
+    }
+  ],
+  "coin_flip": {
+    "rules": {
+      "min_trades": 30,
+      "alpha": 0.05,
+      "runs_a": 10000,
+      "runs_b": 2000
+    },
+    "n": 25,
+    "verdict": "FAIL (too few trades to prove an edge)",
+    "checks": {
+      "trades >= 30": false,
+      "OOS net profit > 0": true,
+      "beats coin-flip direction (p < 0.05)": false,
+      "beats coin-flip timing (p < 0.05)": false
+    },
+    "net": 83.0,
+    "actual_expR": 0.07703562011111163,
+    "resim_expR": 0.07703562011111163,
+    "p_direction": 0.3965,
+    "p_timing": 0.3045,
+    "a_pctl": {
+      "p50": -0.0003982170055548018,
+      "p95": 0.40214229437627974
+    },
+    "b_pctl": {
+      "p50": -0.061276493429306036,
+      "p95": 0.3710304687726986
+    },
+    "win_rate": 0.4
+  },
+  "prop_eval": {
+    "in_sample": {
+      "evals": 169,
+      "passed": 82,
+      "failed": 0,
+      "unresolved": 87,
+      "pass_rate_resolved": 1.0,
+      "median_days_to_pass": 67.0,
+      "rules": {
+        "start": 50000.0,
+        "profit_target": 3000.0,
+        "max_loss": 2000.0,
+        "consistency_pct": 0.5
+      }
+    },
+    "out_of_sample": {
+      "evals": 170,
+      "passed": 0,
+      "failed": 0,
+      "unresolved": 170,
+      "pass_rate_resolved": 0.0,
+      "median_days_to_pass": null,
+      "rules": {
+        "start": 50000.0,
+        "profit_target": 3000.0,
+        "max_loss": 2000.0,
+        "consistency_pct": 0.5
+      }
+    },
+    "out_of_sample_no_consistency": {
+      "evals": 170,
+      "passed": 0,
+      "failed": 0,
+      "unresolved": 170,
+      "pass_rate_resolved": 0.0,
+      "median_days_to_pass": null,
+      "rules": {
+        "start": 50000.0,
+        "profit_target": 3000.0,
+        "max_loss": 2000.0,
+        "consistency_pct": 0
+      }
+    }
+  },
+  "grid_size": 1296,
+  "runtime_s": 165.7
+}

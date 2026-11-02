@@ -1,0 +1,684 @@
+//@version=6
+// Structure + Supply/Demand day-trading bot.
+// Rules come from the "Understanding Price" technical analysis master course.
+//
+// MECHANICAL LAYER
+//   1. Trend from swing highs/lows. A break of structure (BOS) needs a candle BODY close.
+//   2. Top-down: higher-timeframe (HTF) structure sets the bias. Buys only in HTF uptrends, sells only in downtrends.
+//   3. Demand zone = last bearish candle before the impulse that broke structure (wick to wick, extended to the leg low).
+//      Supply zone = last bullish candle before the impulse down.
+//   4. The impulse leg must leave an open imbalance (fair value gap) for the zone to be valid.
+//   5. One tap only: a zone is used up the first time price returns to it.
+//   6. Golden rule: never buy above equal lows, never sell below equal highs.
+//   7. A big candle slamming against the idea kills the zone.
+//   8. Entry: limit order at the fresh zone, or a confirmation entry after lower-timeframe structure breaks back.
+//   9. Stop just past the zone. Target the impulse high/low or a fixed R. Skip anything under the minimum R:R.
+//
+// CONTEXT LAYER (the "discretionary" reads, made measurable)
+//   G1 Pullback quality: the correction into the zone must be slower than the impulse (speed ratio) and choppy
+//      (low efficiency ratio). A pullback as fast and direct as the impulse is indecision or a reversal: skip.
+//   G2 HTF narrative: the HTF must show a clean swing sequence (higher low for buys, lower high for sells) and the
+//      entry must sit in the HTF discount (buys) or premium (sells) of the current HTF leg.
+//   G3 Pre-fill cancel: when price is within x ATR of the limit and has been closing in at >= k ATR per bar,
+//      the limit order is pulled before the next bar can fill it.
+//   G4 Prop drawdown: every trade is sized so a full stop cannot breach the remaining daily loss room, and the bot
+//      stops for the day after N straight losses (on top of the daily loss limit and max trades per day).
+//
+// A Python twin of this script (backtest/engine.py) backtests it bar for bar and rewrites the AUTO-PARAMS block
+// below after every re-tune ("self-updating"). Run it on CME_MINI:MNQ1! (or NQ1!), 5-minute chart.
+strategy("Structure S/D Day Bot", shorttitle = "SD Day Bot", overlay = true,
+     initial_capital = 50000, currency = currency.USD, default_qty_type = strategy.fixed, default_qty_value = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.50,
+     slippage = 1, backtest_fill_limits_assumption = 1, process_orders_on_close = false,
+     calc_on_every_tick = false, pyramiding = 0, max_bars_back = 500,
+     max_boxes_count = 50, max_labels_count = 200)
+
+// ==== AUTO-PARAMS START (written by backtest/update_pine.py - do not edit by hand) ====
+const string AP_VERSION = "2026-11-02 21:07 UTC"
+const string AP_GATE = "FAIL"
+const string AP_OOS = "OOS n=25 net=$83 PF=1.02 expR=0.08 p_dir=0.397 p_time=0.304"
+const string AP_HTF = "15"
+const int AP_HTF_PIV = 2
+const int AP_PIV = 2
+const int AP_INT_PIV = 2
+const string AP_ENTRY = "Limit at zone"
+const string AP_TARGET = "Fixed R"
+const float AP_FIXED_RR = 2.0
+const float AP_MIN_RR = 2.0
+const bool AP_FVG = true
+const float AP_MOM_K = 2.0
+const float AP_EQ_TOL = 0.1
+const float AP_EQ_RANGE = 3.0
+const float AP_BE_R = 0.0
+const int AP_BUF = 4
+const int AP_ZONE_AGE = 96
+const int AP_CONF_BARS = 24
+const float AP_PB_SPEED = 0.6
+const float AP_PB_ER = 0.7
+const bool AP_HTF_CLEAN = true
+const float AP_PD = 1.0
+const float AP_APPR_K = 0.0
+const int AP_APPR_N = 3
+const float AP_APPR_ATR = 1.0
+const int AP_CONSEC = 2
+const float AP_ROOM = 0.9
+// ==== AUTO-PARAMS END ====
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Inputs (defaults come from the AUTO-PARAMS block)
+// ---------------------------------------------------------------------------------------------------------------------
+string G1 = "Top-down structure"
+string htfTF      = input.timeframe(AP_HTF, "HTF bias timeframe", group = G1)
+int    htfPiv     = input.int(AP_HTF_PIV, "HTF swing strength (bars each side)", minval = 1, group = G1)
+int    pivLen     = input.int(AP_PIV, "Swing strength on chart TF", minval = 1, group = G1)
+int    intPiv     = input.int(AP_INT_PIV, "Internal swing strength (confirmation, equal H/L)", minval = 1, group = G1)
+
+string G2 = "Zones and entries"
+string entryMode  = input.string(AP_ENTRY, "Entry model", options = ["Limit at zone", "Confirmation"], group = G2)
+string targetMode = input.string(AP_TARGET, "Target", options = ["Swing high/low", "Fixed R"], group = G2)
+float  fixedRR    = input.float(AP_FIXED_RR, "Fixed R target", step = 0.25, group = G2)
+float  minRR      = input.float(AP_MIN_RR, "Minimum R:R (swing target)", step = 0.25, group = G2)
+bool   requireFVG = input.bool(AP_FVG, "Zone needs an open imbalance (FVG) in its impulse", group = G2)
+float  momK       = input.float(AP_MOM_K, "Kill zone on opposing candle body >= x ATR (0 = off)", step = 0.25, group = G2)
+float  eqTol      = input.float(AP_EQ_TOL, "Equal highs/lows tolerance (x ATR)", step = 0.05, group = G2)
+float  eqRange    = input.float(AP_EQ_RANGE, "Golden rule look-through (x ATR)", step = 0.5, group = G2)
+float  beR        = input.float(AP_BE_R, "Stop to break-even after +R (0 = off)", step = 0.25, group = G2)
+int    bufTicks   = input.int(AP_BUF, "Stop buffer (ticks)", minval = 0, group = G2)
+int    zoneAge    = input.int(AP_ZONE_AGE, "Zone max age (bars)", minval = 1, group = G2)
+int    confBars   = input.int(AP_CONF_BARS, "Confirmation max wait (bars)", minval = 1, group = G2)
+int    maxLegBars = input.int(300, "Max impulse leg length (bars)", minval = 10, maxval = 400, group = G2)
+
+string G5 = "Context layer"
+float  pbSpeedMax = input.float(AP_PB_SPEED, "G1 pullback speed / impulse speed max (99 = off)", step = 0.05, group = G5)
+float  pbErMax    = input.float(AP_PB_ER, "G1 pullback efficiency ratio max (1 = off, low = choppy)", step = 0.05, group = G5)
+bool   htfClean   = input.bool(AP_HTF_CLEAN, "G2 HTF needs higher low (buys) / lower high (sells)", group = G5)
+float  pdLevel    = input.float(AP_PD, "G2 entry within this share of the HTF leg (0.5 = discount/premium, 1 = off)", step = 0.05, group = G5)
+float  apprK      = input.float(AP_APPR_K, "G3 pull limit if closing in >= x ATR per bar (0 = off)", step = 0.05, group = G5)
+int    apprN      = input.int(AP_APPR_N, "G3 approach lookback (bars)", minval = 1, group = G5)
+float  apprAtr    = input.float(AP_APPR_ATR, "G3 only when price is within x ATR of the limit", step = 0.25, group = G5)
+int    maxConsec  = input.int(AP_CONSEC, "G4 stop for the day after N straight losses (0 = off)", minval = 0, group = G5)
+float  roomFrac   = input.float(AP_ROOM, "G4 risk <= share of remaining daily loss room", step = 0.05, group = G5)
+
+string G3 = "Session (New York time, bar close)"
+string sEntryStart = input.string("09:35", "Entries from", group = G3)
+string sEntryEnd   = input.string("15:00", "Entries until", group = G3)
+string sFlat       = input.string("15:50", "Flatten at", group = G3)
+
+string G4 = "Risk / prop-firm eval"
+float  riskUsd      = input.float(300, "Risk per trade ($)", step = 25, group = G4)
+int    maxQty       = input.int(50, "Max contracts", minval = 1, group = G4)
+int    maxTradesDay = input.int(3, "Max trades per day", minval = 1, group = G4)
+float  dailyLoss    = input.float(1000, "Daily loss limit ($)", step = 50, group = G4)
+float  dailyCap     = input.float(0, "Daily profit cap ($, 0 = off)", step = 50, group = G4)
+bool   guardOn      = input.bool(true, "Coin-flip guard: half size when last N trades sum < 0R", group = G4)
+int    guardN       = input.int(20, "Coin-flip guard N", minval = 5, group = G4)
+int    evalStart    = input.time(timestamp("2026-11-02T00:00:00"), "Eval start (tracker only)", group = G4)
+float  evalTarget   = input.float(3000, "Eval profit target ($)", group = G4)
+float  evalMLL      = input.float(2000, "Eval trailing max loss ($)", group = G4)
+bool   haltOnEval   = input.bool(true, "Stop trading once eval passes or fails", group = G4)
+
+bool   showZones = input.bool(true, "Show zones", group = "Display")
+bool   showPanel = input.bool(true, "Show panel", group = "Display")
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------------------------------------------------
+f_hm(string s) =>
+    array<string> parts = str.split(s, ":")
+    int(str.tonumber(array.get(parts, 0))) * 60 + int(str.tonumber(array.get(parts, 1)))
+
+// Pivot high: strictly above the n older bars, >= the n newer bars. Confirmed n bars later.
+f_pivHigh(int n) =>
+    float c = high[n]
+    bool ok = bar_index >= 2 * n
+    if ok
+        for j = 1 to n
+            if high[n + j] >= c or high[n - j] > c
+                ok := false
+                break
+    ok ? c : na
+
+// Pivot low: strictly below the n older bars, <= the n newer bars.
+f_pivLow(int n) =>
+    float c = low[n]
+    bool ok = bar_index >= 2 * n
+    if ok
+        for j = 1 to n
+            if low[n + j] <= c or low[n - j] < c
+                ok := false
+                break
+    ok ? c : na
+
+// HTF structure, evaluated inside request.security. Returns the PREVIOUS HTF bar's values (no repainting):
+// trend, last swing low, highest high since it, last swing high, lowest low since it, higher-low flag, lower-high flag.
+f_htf(int n) =>
+    var float ph = na
+    var float pph = na
+    var bool  phBroken = true
+    var float pl = na
+    var float ppl = na
+    var bool  plBroken = true
+    var int   t = 0
+    var float rh = na
+    var float rl = na
+    float nph = f_pivHigh(n)
+    float npl = f_pivLow(n)
+    float lowN = ta.lowest(low, n + 1)
+    float highN = ta.highest(high, n + 1)
+    if not na(nph)
+        pph := ph
+        ph := nph
+        phBroken := false
+        rl := lowN
+    else
+        rl := na(rl) ? low : math.min(rl, low)
+    if not na(npl)
+        ppl := pl
+        pl := npl
+        plBroken := false
+        rh := highN
+    else
+        rh := na(rh) ? high : math.max(rh, high)
+    if not phBroken and close > ph
+        t := 1
+        phBroken := true
+    if not plBroken and close < pl
+        t := -1
+        plBroken := true
+    bool upClean = not na(ppl) and pl > ppl
+    bool dnClean = not na(pph) and ph < pph
+    [t[1], pl[1], rh[1], ph[1], rl[1], upClean[1], dnClean[1]]
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Series
+// ---------------------------------------------------------------------------------------------------------------------
+[hTrendRaw, hPL, hRH, hPH, hRL, hUpClean, hDnClean] = request.security(syminfo.tickerid, htfTF, f_htf(htfPiv), lookahead = barmerge.lookahead_on)
+int   htfTrend = nz(hTrendRaw)
+float atrV     = ta.atr(14)
+float ftPts    = 1 * syminfo.mintick          // matches backtest_fill_limits_assumption = 1
+float bufPts   = bufTicks * syminfo.mintick
+bool  isLimit  = entryMode == "Limit at zone"
+int   closeMin = hour(time_close, "America/New_York") * 60 + minute(time_close, "America/New_York")
+int   entryStartMin = f_hm(sEntryStart)
+int   entryEndMin   = f_hm(sEntryEnd)
+int   flatMin       = f_hm(sFlat)
+float swPH = f_pivHigh(pivLen)
+float swPL = f_pivLow(pivLen)
+float inPH = f_pivHigh(intPiv)
+float inPL = f_pivLow(intPiv)
+
+// state
+var float lph = na
+var int   lphBar = na
+var bool  phb = true
+var float lpl = na
+var int   lplBar = na
+var bool  plb = true
+var float intPH = na
+var float intPL = na
+var array<float> eqLows  = array.new<float>()
+var array<float> eqHighs = array.new<float>()
+
+var int   zDir = 0
+var float zTop = na
+var float zBot = na
+var float zLeg = na
+var int   zLegBar = na
+var int   zExtBar = na
+var float zPbX = na
+var bool  zPbOk = true
+var int   zBar = na
+var bool  zArmed = false
+var int   zTapBar = na
+var float zTapX = na
+var box   zBox = na
+
+var float pendStop = na
+var float pendTarget = na
+var float pendRisk = na
+var float tStop = na
+var float tTarget = na
+var float tStop0 = na
+var float tRisk = na
+var bool  beDone = false
+
+var float dayStartNet = 0.0
+var int   tradesAtDayStart = 0
+var bool  dayHalted = false
+var int   consec = 0
+var array<float> rList = array.new<float>()
+var int   seenClosed = 0
+var string lastSkip = "-"
+
+var float evalNetStart = na
+var float evalPeakEOD = na
+var string evalStatus = "NOT STARTED"
+
+// golden rule: unswept equal lows below a long entry (equal highs above a short) within range -> blocked
+f_eqBlock(array<float> lv, int d, float E, float tol, float rng) =>
+    bool blocked = false
+    int n = array.size(lv)
+    if n >= 2
+        for a = 0 to n - 2
+            for b = a + 1 to n - 1
+                float va = array.get(lv, a)
+                float vb = array.get(lv, b)
+                if math.abs(va - vb) <= tol
+                    float x = d == 1 ? math.min(va, vb) : math.max(va, vb)
+                    if (d == 1 and x >= E - rng and x < E) or (d == -1 and x > E and x <= E + rng)
+                        blocked := true
+    blocked
+
+// size + target + R:R + golden rule. Returns [qty, target, $risk]; qty 0 = no trade.
+f_plan(int d, float E, float S, float legX, float riskEff) =>
+    float riskPts = (E - S) * d
+    int   q = 0
+    float T = na
+    float rk = na
+    if riskPts > 0 and not na(atrV)
+        T := targetMode == "Fixed R" ? E + d * fixedRR * riskPts : legX
+        bool rrOk = targetMode == "Fixed R" or (T - E) * d / riskPts >= minRR
+        bool eqOk = not f_eqBlock(d == 1 ? eqLows : eqHighs, d, E, eqTol * atrV, eqRange * atrV)
+        if rrOk and eqOk and riskEff > 0
+            q := math.min(math.floor(riskEff / (riskPts * syminfo.pointvalue)), maxQty)
+            rk := q * riskPts * syminfo.pointvalue
+    [q, T, rk]
+
+// G1: correction must be slower than the impulse and choppy
+f_pbOk(int d, float legX, int legBar, int extBar, float zb, float zt, float pbX) =>
+    bool ok = true
+    if pbSpeedMax < 99 or pbErMax < 1
+        int pbBars = bar_index - legBar
+        if pbBars > 0
+            float impPts = d == 1 ? legX - zb : zt - legX
+            int   impBars = math.max(legBar - extBar, 1)
+            float pbPts = d == 1 ? legX - pbX : pbX - legX
+            if impPts <= 0
+                ok := false
+            else
+                float ratio = (pbPts / pbBars) / (impPts / impBars)
+                if ratio > pbSpeedMax
+                    ok := false
+                else if pbErMax < 1
+                    float pathLen = 0.0
+                    for k = 0 to pbBars - 1
+                        pathLen += math.abs(close[k] - close[k + 1])
+                    float er = pathLen > 0 ? math.abs(close - close[pbBars]) / pathLen : 0.0
+                    if er > pbErMax
+                        ok := false
+    ok
+
+// G3: pull the limit order when price is about to fill and is closing in fast
+f_approachOk(int d, float E) =>
+    bool ok = true
+    if apprK > 0 and bar_index >= apprN
+        bool near = d == 1 ? close - E <= apprAtr * atrV : E - close <= apprAtr * atrV
+        float spd = (d == 1 ? close[apprN] - close : close - close[apprN]) / apprN
+        if near and spd >= apprK * atrV
+            ok := false
+    ok
+
+// G2: HTF narrative
+f_htfOk(int d, float E) =>
+    bool ok = true
+    if htfClean and not (d == 1 ? hUpClean : hDnClean)
+        ok := false
+    else if pdLevel < 1
+        if d == 1
+            if not na(hPL) and not na(hRH) and hRH > hPL and E > hPL + pdLevel * (hRH - hPL)
+                ok := false
+        else
+            if not na(hRL) and not na(hPH) and hPH > hRL and E < hPH - pdLevel * (hPH - hRL)
+                ok := false
+    ok
+
+// zone from the impulse that just broke structure.
+// Returns [ok, top, bot, legExtreme, legOffset, extOffset, pullbackExtreme].
+f_makeZone(int d, int pivBar) =>
+    int len = bar_index - pivBar                     // bars pivBar+1 .. now  => offsets 0 .. len-1
+    float ext = d == 1 ? low : high
+    int extOff = 0
+    for k = 0 to len - 1
+        if d == 1 ? low[k] <= ext : high[k] >= ext   // oldest bar of the extreme wins ties
+            ext := d == 1 ? low[k] : high[k]
+            extOff := k
+    int offLo = math.max(extOff - 2, 1)
+    int offHi = math.min(extOff + 2, len - 1)
+    int zcOff = extOff
+    if offLo <= offHi
+        for k = offLo to offHi                       // newest first: last opposite candle before the impulse
+            if d == 1 ? close[k] < open[k] : close[k] > open[k]
+                zcOff := k
+                break
+    float top = d == 1 ? high[zcOff] : ext
+    float bot = d == 1 ? ext : low[zcOff]
+    float legX = d == 1 ? high : low
+    int legOff = 0
+    for k = 0 to extOff                              // impulse extreme, oldest bar wins ties
+        if d == 1 ? high[k] >= legX : low[k] <= legX
+            legX := d == 1 ? high[k] : low[k]
+            legOff := k
+    float pbX = legX
+    if legOff > 0
+        pbX := d == 1 ? low : high
+        for k = 0 to legOff - 1
+            pbX := d == 1 ? math.min(pbX, low[k]) : math.max(pbX, high[k])
+    bool fvgOk = not requireFVG
+    if requireFVG and extOff >= 2
+        float runX = d == 1 ? 1e100 : -1e100
+        for m = 0 to extOff - 2
+            bool gap = d == 1 ? (low[m] > high[m + 2] and runX > high[m + 2]) : (high[m] < low[m + 2] and runX < low[m + 2])
+            runX := d == 1 ? math.min(runX, low[m]) : math.max(runX, high[m])
+            if gap
+                fvgOk := true
+                break
+    [top > bot and fvgOk, top, bot, legX, legOff, extOff, pbX]
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 1. new session day + trade bookkeeping
+// ---------------------------------------------------------------------------------------------------------------------
+bool newDay = timeframe.change("1D")
+int entriesTotal = strategy.closedtrades + strategy.opentrades
+if entriesTotal > nz(entriesTotal[1])                // an entry filled on this bar
+    tStop0 := pendStop
+    tStop := pendStop
+    tTarget := pendTarget
+    tRisk := pendRisk
+    beDone := false
+if newDay
+    dayStartNet := strategy.netprofit
+    tradesAtDayStart := entriesTotal
+    dayHalted := false
+    consec := 0
+
+// closed trades: coin-flip guard (R multiples) and the losing streak counter
+if strategy.closedtrades > seenClosed
+    for k = seenClosed to strategy.closedtrades - 1
+        float pr = strategy.closedtrades.profit(k)
+        array.push(rList, pr / tRisk)
+        if array.size(rList) > guardN
+            array.shift(rList)
+        consec := pr < 0 ? consec + 1 : 0
+    seenClosed := strategy.closedtrades
+
+float dayPnl = strategy.netprofit - dayStartNet + strategy.openprofit
+if dayPnl <= -dailyLoss or (dailyCap > 0 and dayPnl >= dailyCap)
+    dayHalted := true
+if maxConsec > 0 and consec >= maxConsec
+    dayHalted := true
+bool  guardHit = guardOn and array.size(rList) >= guardN and array.sum(rList) < 0
+float riskEff  = riskUsd * (guardHit ? 0.5 : 1.0)
+riskEff := math.min(riskEff, (dailyLoss + math.min(dayPnl, 0.0)) * roomFrac)     // G4
+
+// eval tracker (live forward test from the eval start date)
+if time >= evalStart
+    if na(evalNetStart)
+        evalNetStart := strategy.netprofit
+        evalPeakEOD := 0.0
+        evalStatus := "RUNNING"
+    float evalPnl = strategy.netprofit - evalNetStart + strategy.openprofit
+    float mllLevel = math.min(evalPeakEOD - evalMLL, 0.0)
+    if evalStatus == "RUNNING"
+        if evalPnl <= mllLevel
+            evalStatus := "FAILED"
+        else if evalPnl >= evalTarget
+            evalStatus := "PASSED"
+    if newDay
+        evalPeakEOD := math.max(evalPeakEOD, nz(strategy.netprofit[1] - evalNetStart))
+bool evalStop = haltOnEval and (evalStatus == "PASSED" or evalStatus == "FAILED")
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 2. structure
+// ---------------------------------------------------------------------------------------------------------------------
+if not na(swPH)
+    lph := swPH
+    lphBar := bar_index - pivLen
+    phb := false
+if not na(swPL)
+    lpl := swPL
+    lplBar := bar_index - pivLen
+    plb := false
+// drop swept levels, then add new internal pivots (keep the last 10)
+if array.size(eqLows) > 0
+    for k = array.size(eqLows) - 1 to 0
+        if low < array.get(eqLows, k)
+            array.remove(eqLows, k)
+if array.size(eqHighs) > 0
+    for k = array.size(eqHighs) - 1 to 0
+        if high > array.get(eqHighs, k)
+            array.remove(eqHighs, k)
+if not na(inPH)
+    intPH := inPH
+    array.push(eqHighs, inPH)
+    if array.size(eqHighs) > 10
+        array.shift(eqHighs)
+if not na(inPL)
+    intPL := inPL
+    array.push(eqLows, inPL)
+    if array.size(eqLows) > 10
+        array.shift(eqLows)
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 3. zone maintenance: HTF flip, age, momentum veto, one tap, confirmation
+// ---------------------------------------------------------------------------------------------------------------------
+bool  signal = false
+int   sDir = 0
+float sTop = na
+float sBot = na
+float sLeg = na
+float sTapX = na
+bool  sPbOk = true
+if zDir != 0
+    bool kill = false
+    if htfTrend != zDir
+        kill := true
+    else if bar_index - zBar > zoneAge
+        kill := true
+    else if not zArmed
+        float bodyAgainst = zDir == 1 ? open - close : close - open
+        bool tapped = zDir == 1 ? (isLimit ? low <= zTop - ftPts : low <= zTop) : (isLimit ? high >= zBot + ftPts : high >= zBot)
+        if momK > 0 and bodyAgainst >= momK * atrV
+            kill := true
+            lastSkip := "momentum candle into zone"
+        else if tapped
+            if isLimit
+                kill := true
+            else
+                zPbX := zDir == 1 ? math.min(zPbX, low) : math.max(zPbX, high)
+                zPbOk := f_pbOk(zDir, zLeg, zLegBar, zExtBar, zBot, zTop, zPbX)
+                zArmed := true
+                zTapBar := bar_index
+                zTapX := zDir == 1 ? low : high
+        else
+            if (zDir == 1 and high > zLeg) or (zDir == -1 and low < zLeg)
+                zLeg := zDir == 1 ? high : low
+                zLegBar := bar_index
+                zPbX := zLeg
+            else
+                zPbX := zDir == 1 ? math.min(zPbX, low) : math.max(zPbX, high)
+    if not kill and zArmed
+        if zDir == 1
+            zTapX := math.min(zTapX, low)
+            if close < zBot
+                kill := true
+                lastSkip := "demand failed (close below)"
+            else if not na(intPH) and close > intPH
+                signal := true
+                kill := true
+        else
+            zTapX := math.max(zTapX, high)
+            if close > zTop
+                kill := true
+                lastSkip := "supply failed (close above)"
+            else if not na(intPL) and close < intPL
+                signal := true
+                kill := true
+        if not kill and bar_index - zTapBar >= confBars
+            kill := true
+    if signal
+        sDir := zDir
+        sTop := zTop
+        sBot := zBot
+        sLeg := zLeg
+        sTapX := zTapX
+        sPbOk := zPbOk
+    if kill
+        zDir := 0
+        if not na(zBox)
+            box.delete(zBox)
+            zBox := na
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 4. break of structure (body close) in the HTF direction -> new zone
+// ---------------------------------------------------------------------------------------------------------------------
+if not phb and close > lph
+    phb := true
+    if htfTrend == 1 and bar_index - lphBar > 0 and bar_index - lphBar <= maxLegBars
+        [ok, zt, zb, zl, lo, eo, pbx] = f_makeZone(1, lphBar)
+        if ok
+            zDir := 1
+            zTop := zt
+            zBot := zb
+            zLeg := zl
+            zLegBar := bar_index - lo
+            zExtBar := bar_index - eo
+            zPbX := pbx
+            zPbOk := true
+            zBar := bar_index
+            zArmed := false
+            if not na(zBox)
+                box.delete(zBox)
+            zBox := showZones ? box.new(bar_index, zt, bar_index + 1, zb, border_color = color.new(color.teal, 30), bgcolor = color.new(color.teal, 85), text = "DZ", text_size = size.tiny, text_color = color.teal) : na
+if not plb and close < lpl
+    plb := true
+    if htfTrend == -1 and bar_index - lplBar > 0 and bar_index - lplBar <= maxLegBars
+        [ok, zt, zb, zl, lo, eo, pbx] = f_makeZone(-1, lplBar)
+        if ok
+            zDir := -1
+            zTop := zt
+            zBot := zb
+            zLeg := zl
+            zLegBar := bar_index - lo
+            zExtBar := bar_index - eo
+            zPbX := pbx
+            zPbOk := true
+            zBar := bar_index
+            zArmed := false
+            if not na(zBox)
+                box.delete(zBox)
+            zBox := showZones ? box.new(bar_index, zt, bar_index + 1, zb, border_color = color.new(color.maroon, 30), bgcolor = color.new(color.red, 85), text = "SZ", text_size = size.tiny, text_color = color.maroon) : na
+if not na(zBox) and zDir != 0
+    box.set_right(zBox, bar_index + 1)
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 5. position management: break-even, flat before the close, daily halt
+// ---------------------------------------------------------------------------------------------------------------------
+bool pendExit = false
+float posDir = math.sign(strategy.position_size)
+if posDir != 0
+    float ep = strategy.position_avg_price
+    float riskPts = math.abs(ep - tStop0)
+    if beR > 0 and not beDone
+        float fav = posDir == 1 ? high - ep : ep - low
+        if fav >= beR * riskPts
+            tStop := ep + posDir * syminfo.mintick
+            beDone := true
+    bool eod = closeMin >= flatMin and closeMin <= 17 * 60
+    if eod or dayHalted or evalStop
+        strategy.close_all(comment = eod ? "EOD" : "halt")
+        pendExit := true
+    else
+        if posDir == 1
+            strategy.exit("XL", "L", stop = tStop, limit = tTarget)
+        else
+            strategy.exit("XS", "S", stop = tStop, limit = tTarget)
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 6. orders for the next bar (context layer checks first)
+// ---------------------------------------------------------------------------------------------------------------------
+bool inWindow = closeMin >= entryStartMin and closeMin < entryEndMin
+bool canTrade = strategy.position_size == 0 and not pendExit and inWindow and not dayHalted and not evalStop and entriesTotal - tradesAtDayStart < maxTradesDay
+bool placed = false
+if signal and canTrade
+    float E = close
+    float S = sDir == 1 ? math.min(sBot, sTapX) - bufPts : math.max(sTop, sTapX) + bufPts
+    if not sPbOk
+        lastSkip := "G1 pullback too aggressive"
+    else if not f_htfOk(sDir, E)
+        lastSkip := "G2 HTF narrative"
+    else
+        [q, T, rk] = f_plan(sDir, E, S, sLeg, riskEff)
+        if q >= 1
+            pendStop := S
+            pendTarget := T
+            pendRisk := rk
+            string msg = '{"symbol":"' + syminfo.ticker + '","side":"' + (sDir == 1 ? "buy" : "sell") + '","qty":' + str.tostring(q) + ',"type":"market","stop":' + str.tostring(S) + ',"target":' + str.tostring(T) + '}'
+            if sDir == 1
+                strategy.entry("L", strategy.long, qty = q, alert_message = msg)
+                strategy.exit("XL", "L", stop = S, limit = T)
+            else
+                strategy.entry("S", strategy.short, qty = q, alert_message = msg)
+                strategy.exit("XS", "S", stop = S, limit = T)
+            placed := true
+        else
+            lastSkip := "R:R, golden rule or size"
+else if zDir != 0 and isLimit and canTrade
+    float E = zDir == 1 ? zTop : zBot
+    float S = zDir == 1 ? zBot - bufPts : zTop + bufPts
+    if not f_pbOk(zDir, zLeg, zLegBar, zExtBar, zBot, zTop, zPbX)
+        lastSkip := "G1 pullback too aggressive"
+    else if not f_approachOk(zDir, E)
+        lastSkip := "G3 limit pulled: fast approach"
+    else if not f_htfOk(zDir, E)
+        lastSkip := "G2 HTF narrative"
+    else
+        [q, T, rk] = f_plan(zDir, E, S, zLeg, riskEff)
+        if q >= 1
+            pendStop := S
+            pendTarget := T
+            pendRisk := rk
+            string msg = '{"symbol":"' + syminfo.ticker + '","side":"' + (zDir == 1 ? "buy" : "sell") + '","qty":' + str.tostring(q) + ',"type":"limit","price":' + str.tostring(E) + ',"stop":' + str.tostring(S) + ',"target":' + str.tostring(T) + '}'
+            if zDir == 1
+                strategy.entry("L", strategy.long, qty = q, limit = E, alert_message = msg)
+                strategy.exit("XL", "L", stop = S, limit = T)
+            else
+                strategy.entry("S", strategy.short, qty = q, limit = E, alert_message = msg)
+                strategy.exit("XS", "S", stop = S, limit = T)
+            placed := true
+        else
+            lastSkip := "R:R, golden rule or size"
+if not placed and strategy.position_size == 0
+    strategy.cancel("L")
+    strategy.cancel("S")
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------------------------------------------------
+bgcolor(htfTrend == 1 ? color.new(color.teal, 96) : htfTrend == -1 ? color.new(color.red, 96) : na, title = "HTF bias")
+plot(strategy.position_size != 0 ? tStop : na, "Stop", color.red, style = plot.style_linebr)
+plot(strategy.position_size != 0 ? tTarget : na, "Target", color.green, style = plot.style_linebr)
+
+var table panel = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 20), border_width = 1)
+if showPanel and barstate.islast
+    color gateCol = AP_GATE == "PASS" ? color.green : AP_GATE == "NOT RUN" ? color.gray : color.red
+    bool  htfIsClean = (htfTrend == 1 and hUpClean) or (htfTrend == -1 and hDnClean)
+    table.cell(panel, 0, 0, "Params", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 0, AP_VERSION, text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 1, "Coin-flip gate", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 1, AP_GATE, text_color = color.white, bgcolor = gateCol, text_size = size.small)
+    table.cell(panel, 0, 2, "OOS test", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 2, AP_OOS, text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 3, "HTF " + htfTF + " bias", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 3, (htfTrend == 1 ? "UP (buys only)" : htfTrend == -1 ? "DOWN (sells only)" : "none") + (htfIsClean ? " | clean" : " | not clean"), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 4, "Zone", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 4, zDir == 0 ? "none" : (zDir == 1 ? "demand " : "supply ") + str.tostring(zBot, format.mintick) + " - " + str.tostring(zTop, format.mintick) + (zArmed ? " (tapped, waiting)" : ""), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 5, "Last skip", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 5, lastSkip, text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 6, "Today", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 6, "$" + str.tostring(dayPnl, "#.##") + " | trades " + str.tostring(entriesTotal - tradesAtDayStart) + "/" + str.tostring(maxTradesDay) + " | losses in a row " + str.tostring(consec) + (dayHalted ? " | HALTED" : ""), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 7, "Coin-flip guard", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 7, guardHit ? "ON: half size" : "off (last " + str.tostring(array.size(rList)) + " trades " + str.tostring(array.sum(rList), "#.##") + "R)", text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 8, "Eval", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 8, evalStatus + (na(evalNetStart) ? "" : " | $" + str.tostring(strategy.netprofit - evalNetStart + strategy.openprofit, "#.##") + " of $" + str.tostring(evalTarget, "#")), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 9, "Risk/trade", text_color = color.white, text_size = size.small)
+    table.cell(panel, 1, 9, "$" + str.tostring(riskEff, "#") + " | DLL $" + str.tostring(dailyLoss, "#"), text_color = color.white, text_size = size.small)

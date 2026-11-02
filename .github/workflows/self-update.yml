@@ -1,0 +1,31 @@
+# Self-update loop: every Saturday, pull the newest NQ bars, re-tune on the
+# first half, run the coin-flip gate on the second half, and commit the new
+# AUTO-PARAMS block into the Pine script only if the gate passes.
+# Then paste strategy/understanding_price_strategy.pine into TradingView again.
+name: self-update
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 14 * * 6"   # Saturdays 14:17 UTC (market closed)
+permissions:
+  contents: write
+jobs:
+  retune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas pyarrow numpy yfinance
+      - run: bash backtest/fetch_data.sh
+      - run: python backtest/refresh_data.py --yahoo --out data/nq_merged.parquet
+      - run: python backtest/pipeline.py --data data/nq_merged.parquet
+      - name: Commit if anything changed
+        run: |
+          git config user.name "self-update bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add strategy params reports
+          git diff --cached --quiet || git commit -m "Self-update: re-tune and coin-flip check ($(date -u +%F))"
+          git push
