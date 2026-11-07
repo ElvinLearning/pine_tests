@@ -34,17 +34,17 @@ strategy("Structure S/D Day Bot", shorttitle = "SD Day Bot", overlay = true,
      max_boxes_count = 50, max_labels_count = 200)
 
 // ==== AUTO-PARAMS START (written by backtest/update_pine.py - do not edit by hand) ====
-const string AP_VERSION = "2026-11-02 21:45 UTC"
+const string AP_VERSION = "2026-11-07 18:48 UTC"
 const string AP_GATE = "FAIL"
-const string AP_OOS = "OOS n=51 net=$4,172 PF=1.62 expR=0.36 p_dir=0.065 p_time=0.034"
+const string AP_OOS = "OOS n=30 net=$7,649 PF=2.99 expR=1.14 p_dir=0.193 p_time=0.190"
 const string AP_HTF = "15"
 const int AP_HTF_PIV = 2
 const int AP_PIV = 2
 const int AP_INT_PIV = 2
 const string AP_ENTRY = "Limit at zone"
 const string AP_TARGET = "Fixed R"
-const float AP_FIXED_RR = 2.5
-const float AP_MIN_RR = 2.5
+const float AP_FIXED_RR = 2.0
+const float AP_MIN_RR = 2.0
 const bool AP_FVG = true
 const float AP_MOM_K = 2.0
 const float AP_EQ_TOL = 0.1
@@ -53,8 +53,8 @@ const float AP_BE_R = 0.0
 const int AP_BUF = 4
 const int AP_ZONE_AGE = 96
 const int AP_CONF_BARS = 24
-const float AP_PB_SPEED = 99.0
-const float AP_PB_ER = 1.0
+const float AP_PB_SPEED = 0.6
+const float AP_PB_ER = 0.7
 const bool AP_HTF_CLEAN = true
 const float AP_PD = 1.0
 const float AP_APPR_K = 0.0
@@ -62,11 +62,11 @@ const int AP_APPR_N = 3
 const float AP_APPR_ATR = 1.0
 const int AP_CONSEC = 2
 const float AP_ROOM = 0.9
-const bool AP_USE_HTF2 = true
-const string AP_HTF2 = "60"
+const bool AP_USE_HTF2 = false
+const string AP_HTF2 = "240"
 const string AP_ENTRY_START = "09:35"
 const string AP_ENTRY_END = "15:00"
-const bool AP_SWEEP = true
+const bool AP_SWEEP = false
 // ==== AUTO-PARAMS END ====
 
 // ---------------------------------------------------------------------------------------------------------------------
